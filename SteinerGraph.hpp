@@ -6,6 +6,7 @@
 #include <unordered_set>
 #include <vector>
 #include <random>
+#include <algorithm>
 
 class Node
 {
@@ -71,9 +72,7 @@ public:
         }
     }
 
-    // --- IMPRESSÃO ATUALIZADA (Suporta Nós Isolados) ---
     void printGraph() {
-        // 1. Imprime todas as arestas existentes
         for (auto& pairU : adj) {
             int u = pairU.first;
             for (auto& pairV : pairU.second) {
@@ -85,8 +84,6 @@ public:
                 }
             }
         }
-        
-        // 2. Imprime nós que não possuem nenhuma aresta vinculada
         for (auto& pair : nodes) {
             int u = pair.first;
             if (adj.count(u) == 0 || adj[u].empty()) {
@@ -95,72 +92,149 @@ public:
         }
     }
 
-    // --- ALGORITMO GULOSO E HEURÍSTICO PARA PCST ---
-    SteinerGraph computeGreedyPCST() {
+    
+    std::pair<SteinerGraph, int> buildTreeRandomized(std::mt19937& gen, double alpha) {
         SteinerGraph tree;
-        if (nodes.empty()) return tree;
+        if (nodes.empty()) return {tree, 0};
 
-        // Sorteia um nó inicial a partir da lista de nós do grafo
         std::vector<int> allNodes;
         for (auto& pair : nodes) {
             allNodes.push_back(pair.first);
         }
         
-        std::random_device rd;
-        std::mt19937 gen(rd());
         std::uniform_int_distribution<> dis(0, allNodes.size() - 1);
         int startNode = allNodes[dis(gen)];
 
-        // Estrutura para controlar quem já entrou na nossa árvore
         std::unordered_set<int> visited;
-        
-        // Inicializa a árvore com o nó sorteado
         tree.addNode(startNode, nodes[startNode].value);
         visited.insert(startNode);
-
-        std::cout << "[HEURISTICA] No inicial sorteado: " << startNode << "\n";
+        
+        int lucro_total = nodes[startNode].value;
 
         while (true) {
-            int bestU = -1;
-            int bestV = -1;
-            int bestWeight = -1;
-            int maxProfit = -999999; // Equivalente a menos infinito inicial
+            struct Candidate { int u; int v; int weight; int profit; };
+            std::vector<Candidate> candidates;
 
-            // Busca em todas as fronteiras da árvore atual por uma expansão lucrativa
             for (int u : visited) {
                 if (adj.count(u)) {
                     for (auto& edge : adj[u]) {
                         int v = edge.first;
                         int weight = edge.second;
 
-                        // Só avalia nós vizinhos que ainda não estão na árvore
                         if (visited.find(v) == visited.end()) {
-                            // Métrica: Lucro = Prêmio do Vizinho - Custo da Aresta
                             int profit = nodes[v].value - weight;
-                            if (profit > maxProfit) {
-                                maxProfit = profit;
-                                bestU = u;
-                                bestV = v;
-                                bestWeight = weight;
-                            }
+                            candidates.push_back({u, v, weight, profit});
                         }
                     }
                 }
             }
 
-            // CRITÉRIO DE PARADA: Se não há mais vizinhos alcançáveis 
-            // ou se a melhor opção disponível der prejuízo (<= 0), encerra a árvore.
-            if (bestV == -1 || maxProfit <= 0) {
-                break;
+            if (candidates.empty()) break;
+
+            int maxProfit = -999999;
+            int minProfit = 999999;
+            for (const auto& c : candidates) {
+                if (c.profit > maxProfit) maxProfit = c.profit;
+                if (c.profit < minProfit) minProfit = c.profit;
             }
 
-            // Adiciona o nó e a aresta vencedora na subárvore de Steiner
-            tree.addNode(bestV, nodes[bestV].value);
-            tree.addEdge(bestU, bestV, bestWeight);
-            visited.insert(bestV);
+            if (maxProfit << 0 || maxProfit <= 0) break; // Sem opções lucrativas
+
+            // Corte da Lista de Candidatos Restrita para Maximização
+            double threshold = maxProfit - alpha * (maxProfit - minProfit);
+            
+            std::vector<Candidate> rcl;
+            for (const auto& c : candidates) {
+                if (c.profit >= threshold && c.profit > 0) {
+                    rcl.push_back(c);
+                }
+            }
+
+            if (rcl.empty()) break;
+
+            std::uniform_int_distribution<> rclDis(0, rcl.size() - 1);
+            Candidate chosen = rcl[rclDis(gen)];
+
+            tree.addNode(chosen.v, nodes[chosen.v].value);
+            tree.addEdge(chosen.u, chosen.v, chosen.weight);
+            visited.insert(chosen.v);
+            lucro_total += chosen.profit;
         }
 
-        return tree;
+        return {tree, lucro_total};
+    }
+
+    // guloso
+    std::pair<SteinerGraph, int> computePureGreedyPCST(std::mt19937& gen) {
+        return buildTreeRandomized(gen, 0.0);
+    }
+
+    // guloso randomizado
+    std::pair<SteinerGraph, int> computeRandomizedGreedyPCST(std::mt19937& gen, double alpha, int iterations) {
+        SteinerGraph bestTree;
+        int bestProfit = -999999;
+
+        for (int i = 0; i < iterations; ++i) {
+            auto [currentTree, currentProfit] = buildTreeRandomized(gen, alpha);
+            if (currentProfit > bestProfit) {
+                bestProfit = currentProfit;
+                bestTree = currentTree;
+            }
+        }
+        return {bestTree, bestProfit};
+    }
+
+    // randomizado e reativo
+    std::pair<SteinerGraph, int> computeReactiveGreedyPCST(std::mt19937& gen, const std::vector<double>& alphas, int iterations, int blockSize) {
+        SteinerGraph bestTree;
+        int bestProfit = -999999;
+        size_t m = alphas.size();
+
+        std::vector<double> probabilities(m, 1.0 / m);
+        std::vector<std::vector<int>> blockHistory(m);
+
+        for (int it = 1; it <= iterations; ++it) {
+            // Seleção roleta baseada nas probabilidades atuais
+            std::discrete_distribution<> dist(probabilities.begin(), probabilities.end());
+            int idx_alpha = dist(gen);
+            double alpha = alphas[idx_alpha];
+
+            auto [currentTree, currentProfit] = buildTreeRandomized(gen, alpha);
+            blockHistory[idx_alpha].push_back(currentProfit);
+
+            if (currentProfit > bestProfit) {
+                bestProfit = currentProfit;
+                bestTree = currentTree;
+            }
+
+            
+            if (it % blockSize == 0) {
+                std::vector<double> qualities(m, 0.0);
+                double sumQualities = 0.0;
+
+                for (size_t i = 0; i < m; ++i) {
+                    if (!blockHistory[i].empty()) {
+                        double sumProfits = 0;
+                        for (int p : blockHistory[i]) sumProfits += p;
+                        double avgProfit = sumProfits / blockHistory[i].size();
+                        
+                        // Evita divisões esquisitas ou qualidades negativas
+                        qualities[i] = std::max(0.0, avgProfit); 
+                        sumQualities += qualities[i];
+                    }
+                }
+
+                for (size_t i = 0; i < m; ++i) {
+                    if (sumQualities > 0.0) {
+                        probabilities[i] = qualities[i] / sumQualities;
+                    } else {
+                        probabilities[i] = 1.0 / m;
+                    }
+                    blockHistory[i].clear(); 
+                }
+            }
+        }
+        return {bestTree, bestProfit};
     }
 };
 
