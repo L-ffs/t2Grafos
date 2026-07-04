@@ -170,15 +170,19 @@ public:
     }
 
     // guloso randomizado
-    std::pair<SteinerGraph, int> computeRandomizedGreedyPCST(std::mt19937& gen, double alpha, int iterations) {
+    std::pair<SteinerGraph, int> computeRandomizedGreedyMultiAlpha(std::mt19937& gen, const std::vector<double>& alphas, int iterations) 
+    {
         SteinerGraph bestTree;
         int bestProfit = -999999;
 
-        for (int i = 0; i < iterations; ++i) {
-            auto [currentTree, currentProfit] = buildTreeRandomized(gen, alpha);
-            if (currentProfit > bestProfit) {
-                bestProfit = currentProfit;
-                bestTree = currentTree;
+        // Testa cada alpha independentemente
+        for (double a : alphas) {
+            for (int i = 0; i < iterations; ++i) {
+                auto [currentTree, currentProfit] = buildTreeRandomized(gen, a);
+                if (currentProfit > bestProfit) {
+                    bestProfit = currentProfit;
+                    bestTree = currentTree;
+                }
             }
         }
         return {bestTree, bestProfit};

@@ -76,8 +76,9 @@ int main(int argc, char* argv[]) {
 };
     double alphaUnico = 0.3;
     std::vector<double> listaAlfas = {0.1, 0.3, 0.5, 0.8};
-    int numIteracoesInternas = 50; // Iterações de cada chamada do algoritmo
-    int tamanhoBloco = 10;
+    int numIteracoesInternas = 30;
+    int numIteracoesInternasAdaptativo = 300; // Iterações de cada chamada do algoritmo
+    int tamanhoBloco = 45;
     
     std::string nomeCsv = "resultados_experimento.csv";
     
@@ -147,12 +148,14 @@ int main(int argc, char* argv[]) {
             graph.computePureGreedyPCST(gen);
         });
 
-        // Guloso Randomizado
-        std::string paramsRand = "alpha=" + std::to_string(alphaUnico) + ";iter=" + std::to_string(numIteracoesInternas);
-        executarRodadaDeDez("Guloso Randomizado", paramsRand, [&]() {
-            graph.computeRandomizedGreedyPCST(gen, alphaUnico, 30);
-        });
-
+        // Guloso Randomizado Multi-Alpha
+        for (i = 0; i < listaAlfas.size(); ++i) {
+            double alpha = listaAlfas[i];
+            std::string params = "alpha=" + std::to_string(alpha) + ";iter=" + std::to_string(numIteracoesInternasAdaptativo);
+            executarRodadaDeDez("Guloso Randomizado Multi-Alpha", params, [&]() {
+                graph.computeRandomizedGreedyMultiAlpha(gen, listaAlfas, numIteracoesInternasAdaptativo);
+            });
+        }
         // Guloso Randomizado Reativo
         std::string paramsReact = "alphas_qtd=" + std::to_string(listaAlfas.size()) + ";iter=" + std::to_string(numIteracoesInternas) + ";bloco=" + std::to_string(tamanhoBloco);
         executarRodadaDeDez("Randomizado Reativo", paramsReact, [&]() {
