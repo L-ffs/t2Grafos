@@ -149,7 +149,7 @@ int main(int argc, char* argv[]) {
         });
 
         // Guloso Randomizado Multi-Alpha
-        for (i = 0; i < listaAlfas.size(); ++i) {
+        for (int i = 0; i < listaAlfas.size(); ++i) {
             double alpha = listaAlfas[i];
             std::string params = "alpha=" + std::to_string(alpha) + ";iter=" + std::to_string(numIteracoesInternasAdaptativo);
             executarRodadaDeDez("Guloso Randomizado Multi-Alpha", params, [&]() {
