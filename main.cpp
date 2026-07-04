@@ -114,7 +114,7 @@ int main(int argc, char* argv[]) {
                 auto start = std::chrono::high_resolution_clock::now();
                 
                 // Executa a função do algoritmo passada por parâmetro
-                funcaoAlgo(); 
+                funcaoAlgo();
                 
                 auto end = std::chrono::high_resolution_clock::now();
                 double duracao = std::chrono::duration<double, std::milli>(end - start).count();
@@ -150,13 +150,13 @@ int main(int argc, char* argv[]) {
         // Guloso Randomizado
         std::string paramsRand = "alpha=" + std::to_string(alphaUnico) + ";iter=" + std::to_string(numIteracoesInternas);
         executarRodadaDeDez("Guloso Randomizado", paramsRand, [&]() {
-            graph.computeRandomizedGreedyPCST(gen, alphaUnico, numIteracoesInternas);
+            graph.computeRandomizedGreedyPCST(gen, alphaUnico, 30);
         });
 
         // Guloso Randomizado Reativo
         std::string paramsReact = "alphas_qtd=" + std::to_string(listaAlfas.size()) + ";iter=" + std::to_string(numIteracoesInternas) + ";bloco=" + std::to_string(tamanhoBloco);
         executarRodadaDeDez("Randomizado Reativo", paramsReact, [&]() {
-            graph.computeReactiveGreedyPCST(gen, listaAlfas, numIteracoesInternas, tamanhoBloco);
+            graph.computeReactiveGreedyPCST(gen, listaAlfas, 300, 45);
         });
 
         std::cout << "Grafo " << arquivoGrafo << " finalizado com sucesso.\n\n";
