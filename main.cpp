@@ -58,9 +58,9 @@ int main(int argc, char* argv[]) {
     };
 
     std::vector<double> listaAlfas = {0.1, 0.3, 0.5, 0.8};
-    int numIteracoesInternasAdaptativo = 300; 
+    int numIteracoesInternasAdaptativo = 30; 
     int tamanhoBloco = 45;
-    std::string nomeCsv = "resultados_experimento.csv";
+    std::string nomeCsv = "resultados.csv";
 
     // Cabeçalho estrito conforme exigido pelo trabalho
     if (!arquivoExiste(nomeCsv)) {
