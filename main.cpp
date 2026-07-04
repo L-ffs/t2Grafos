@@ -58,7 +58,8 @@ int main(int argc, char* argv[]) {
     };
 
     std::vector<double> listaAlfas = {0.1, 0.3, 0.5, 0.8};
-    int numIteracoesInternasAdaptativo = 300; 
+    int numIteracoesInternasAdaptativo = 300;
+    int numIteracoes30 = 30; 
     int tamanhoBloco = 45;
     std::string nomeCsv = "resultados_experimento.csv";
 
@@ -135,19 +136,19 @@ int main(int argc, char* argv[]) {
             return graph.computePureGreedyPCST(gen);
         });
 
-        // Guloso Randomizado Multi-Alpha
+        // Guloso Randomizado com Alpha Fixo
         for (size_t i = 0; i < listaAlfas.size(); ++i) {
             double alpha = listaAlfas[i];
-            std::string params = "alpha=" + std::to_string(alpha) + ";iter=" + std::to_string(numIteracoesInternasAdaptativo);
-            executarRodadaDeDez("Guloso Randomizado Multi-Alpha", params, [&]() {
-                return graph.computeRandomizedGreedyMultiAlpha(gen, listaAlfas, numIteracoesInternasAdaptativo);
+            std::string params = "alpha=" + std::to_string(alpha) + ";iter=" + std::to_string(numIteracoes30);
+            executarRodadaDeDez("Guloso Randomizado Alpha Fixo", params, [&]() {
+                return graph.computeRandomizedGreedyFixedAlpha(gen, alpha, numIteracoes30);
             });
         }
 
         // Guloso Randomizado Reativo
         std::string paramsReact = "alphas_qtd=" + std::to_string(listaAlfas.size()) + ";iter=300;bloco=45";
         executarRodadaDeDez("Randomizado Reativo", paramsReact, [&]() {
-            return graph.computeReactiveGreedyPCST(gen, listaAlfas, 300, 45);
+            return graph.computeReactiveGreedyPCST(gen, listaAlfas, numIteracoesInternasAdaptativo, tamanhoBloco);
         });
     }
 

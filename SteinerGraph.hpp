@@ -110,6 +110,19 @@ public:
         return buildTreeRandomized(gen, 0.0);
     }
 
+    std::pair<SteinerGraph, int> computeRandomizedGreedyFixedAlpha(std::mt19937& gen, double alpha, int iterations) {
+        SteinerGraph bestTree;
+        int bestProfit = -999999;
+        for (int i = 0; i < iterations; ++i) {
+            auto [currentTree, currentProfit] = buildTreeRandomized(gen, alpha);
+            if (currentProfit > bestProfit) {
+                bestProfit = currentProfit;
+                bestTree = currentTree;
+            }
+        }
+        return {bestTree, bestProfit};
+    }
+
     std::pair<SteinerGraph, int> computeRandomizedGreedyMultiAlpha(std::mt19937& gen, const std::vector<double>& alphas, int iterations) {
         SteinerGraph bestTree;
         int bestProfit = -999999;
