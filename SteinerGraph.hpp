@@ -1,5 +1,6 @@
 #ifndef STEINER_GRAPH_HPP
 #define STEINER_GRAPH_HPP
+
 #include <iostream>
 #include <unordered_map>
 #include <unordered_set>
@@ -27,7 +28,6 @@ public:
     SteinerGraph() {}
     ~SteinerGraph() {}
 
-    // ... (mantenha os métodos addNode, removeNode, addEdge, etc. originais) ...
     void addNode(int name, int value) { nodes[name] = Node(name, value); }
     void addEdge(int u, int v, int weight) {
         if (nodes.count(u) && nodes.count(v)) {
@@ -36,7 +36,6 @@ public:
         }
     }
 
-    // NOVO MÉTODO: Calcula o prêmio total do grafo (P_total)
     int getTotalPrize() const {
         int total = 0;
         for (const auto& pair : nodes) {
@@ -85,7 +84,6 @@ public:
                 if (c.profit < minProfit) minProfit = c.profit;
             }
             
-            // CORREÇÃO DE BUG: O operador << é bitwise shift. O correto é apenas <=
             if (maxProfit <= 0) break; 
             
             double threshold = maxProfit - alpha * (maxProfit - minProfit);
@@ -138,24 +136,36 @@ public:
         return {bestTree, bestProfit};
     }
 
-    std::pair<SteinerGraph, int> computeReactiveGreedyPCST(std::mt19937& gen, const std::vector<double>& alphas, int iterations, int blockSize) {
+    
+
+    std::pair<SteinerGraph, int> computeReactiveGreedyPCST(std::mt19937& gen, const std::vector<double>& alphas, int iterations, int blockSize, double& bestAlpha) {
         SteinerGraph bestTree;
         int bestProfit = -999999;
         size_t m = alphas.size();
         std::vector<double> probabilities(m, 1.0 / m);
         std::vector<std::vector<int>> blockHistory(m);
         
+        if(!alphas.empty()) bestAlpha = alphas[0];
+        
+        std::vector<uint32_t> subSeeds(iterations);
+        for (int i = 0; i < iterations; ++i) {
+            subSeeds[i] = gen();
+        }
+        
         for (int it = 1; it <= iterations; ++it) {
             std::discrete_distribution<> dist(probabilities.begin(), probabilities.end());
             int idx_alpha = dist(gen);
             double alpha = alphas[idx_alpha];
             
-            auto [currentTree, currentProfit] = buildTreeRandomized(gen, alpha);
+            std::mt19937 local_gen(subSeeds[it - 1]);
+            auto [currentTree, currentProfit] = buildTreeRandomized(local_gen, alpha);
+            
             blockHistory[idx_alpha].push_back(currentProfit);
             
             if (currentProfit > bestProfit) {
                 bestProfit = currentProfit;
                 bestTree = currentTree;
+                bestAlpha = alpha; // Salva o melhor alfa aqui
             }
             
             if (it % blockSize == 0) {
@@ -177,7 +187,8 @@ public:
                 }
             }
         }
-        return {bestTree, bestProfit};
+        return {bestTree, bestProfit}; // Retorna a melhor árvore e o melhor lucro global
     }
+
 };
 #endif

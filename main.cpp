@@ -61,13 +61,13 @@ int main(int argc, char* argv[]) {
     int numIteracoesInternasAdaptativo = 300;
     int numIteracoes30 = 30; 
     int tamanhoBloco = 45;
-    std::string nomeCsv = "resultados_experimento.csv";
+    std::string nomeCsv = "novoModelocsv.csv";
 
-    // Cabeçalho estrito conforme exigido pelo trabalho
+    // Adicionado "Melhor_Alfa" no cabeçalho estrito antes de Custo_Equivalente
     if (!arquivoExiste(nomeCsv)) {
         std::ofstream csvCriar(nomeCsv);
         if (csvCriar.is_open()) {
-            csvCriar << "Data_Hora,Instancia,Parametros_Teste,Algoritmo,Parametros_Algoritmo,Semente,Tempo_Medio_ms,Melhor_NetProfit,Custo_Equivalente,LB_Cost_Paper,Gap(%)\n";
+            csvCriar << "Data_Hora,Instancia,Parametros_Teste,Algoritmo,Parametros_Algoritmo,Semente,Tempo_Medio_ms,Melhor_NetProfit,Melhor_Alfa,Custo_Equivalente,LB_Cost_Paper,Gap(%)\n";
             csvCriar.close();
         }
     }
@@ -88,21 +88,37 @@ int main(int argc, char* argv[]) {
 
         std::mt19937 gen(seed);
 
-        auto executarRodadaDeDez = [&](const std::string& nomeAlgo, const std::string& parametrosStr, auto funcaoAlgo) {
+        // Adicionado o parâmetro opcional 'alfaRodada' à assinatura da lambda para capturar o melhor alfa
+        auto executarRodadaDeDez = [&](const std::string& nomeAlgo, const std::string& parametrosStr, auto funcaoAlgo, std::string alfaGlobalStr = "N/A") {
             int melhorNetProfit = std::numeric_limits<int>::min();
             double tempoTotal = 0.0;
             
             std::cout << " -> Rodando " << nomeAlgo << " (10 vezes)... ";
             for (int i = 0; i < 10; ++i) {
                 auto start = std::chrono::high_resolution_clock::now();
-                auto [arvore, netProfit] = funcaoAlgo();
+                
+                // CHAMADA DO ALGORITMO
+                auto resultado = funcaoAlgo();
+                
                 auto end = std::chrono::high_resolution_clock::now();
                 
                 double duracao = std::chrono::duration<double, std::milli>(end - start).count();
                 tempoTotal += duracao;
-                
-                if (netProfit > melhorNetProfit) {
-                    melhorNetProfit = netProfit;
+
+                // SE O ALGORITMO RETORNAR UM PAIR (Lucro, Alfa) -> Caso do Reativo
+                if constexpr (std::is_same_v<decltype(resultado), std::pair<int, double>>) {
+                    auto [netProfit, alfaRodada] = resultado;
+                    if (netProfit > melhorNetProfit) {
+                        melhorNetProfit = netProfit;
+                        alfaGlobalStr = std::to_string(alfaRodada); // Atualiza o alfa que vai pro CSV na hora certa!
+                    }
+                } 
+                // SE RETORNAR O PADRÃO (Arvore, Lucro) -> Outros algoritmos
+                else {
+                    auto [arvore, netProfit] = resultado;
+                    if (netProfit > melhorNetProfit) {
+                        melhorNetProfit = netProfit;
+                    }
                 }
             }
             
@@ -124,6 +140,7 @@ int main(int argc, char* argv[]) {
                         << seed << ","
                         << tempoMedio << ","
                         << melhorNetProfit << ","
+                        << alfaGlobalStr << ","      // Gravando o melhor alfa coletado (ou "N/A" para os outros)
                         << custoEquivalente << ","
                         << lbPaper << ","
                         << std::fixed << std::setprecision(3) << gap << "\n";
@@ -142,13 +159,18 @@ int main(int argc, char* argv[]) {
             std::string params = "alpha=" + std::to_string(alpha) + ";iter=" + std::to_string(numIteracoes30);
             executarRodadaDeDez("Guloso Randomizado Alpha Fixo", params, [&]() {
                 return graph.computeRandomizedGreedyFixedAlpha(gen, alpha, numIteracoes30);
-            });
+            }, std::to_string(alpha)); // Passa o próprio alfa fixo para o CSV
         }
 
-        // Guloso Randomizado Reativo
+       // Guloso Randomizado Reativo
         std::string paramsReact = "alphas_qtd=" + std::to_string(listaAlfas.size()) + ";iter=300;bloco=45";
+
         executarRodadaDeDez("Randomizado Reativo", paramsReact, [&]() {
-            return graph.computeReactiveGreedyPCST(gen, listaAlfas, numIteracoesInternasAdaptativo, tamanhoBloco);
+            double alfaDaRodada = -1.0;
+            auto [arvore, netProfit] = graph.computeReactiveGreedyPCST(gen, listaAlfas, numIteracoesInternasAdaptativo, tamanhoBloco, alfaDaRodada);
+            
+            // Retorna o lucro e o alfa da rodada atual como um par
+            return std::make_pair(netProfit, alfaDaRodada);
         });
     }
 
