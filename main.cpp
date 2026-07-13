@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include "SteinerGraph.hpp"
 #include "ReaderSteiner.hpp"
+#include <functional>
 
 std::string obterDataHoraAtual() {
     std::time_t agora = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
@@ -58,16 +59,15 @@ int main(int argc, char* argv[]) {
     };
 
     std::vector<double> listaAlfas = {0.1, 0.3, 0.5, 0.8};
-    int numIteracoesInternasAdaptativo = 300;
-    int numIteracoes30 = 30; 
+    int numIteracoesInternasAdaptativo = 300; 
     int tamanhoBloco = 45;
-    std::string nomeCsv = "novoModelocsv.csv";
+    std::string nomeCsv = "resultados_experimento_2.csv";
 
-    // Adicionado "Melhor_Alfa" no cabeçalho estrito antes de Custo_Equivalente
+    // Cabeçalho estrito conforme exigido pelo trabalho
     if (!arquivoExiste(nomeCsv)) {
         std::ofstream csvCriar(nomeCsv);
         if (csvCriar.is_open()) {
-            csvCriar << "Data_Hora,Instancia,Parametros_Teste,Algoritmo,Parametros_Algoritmo,Semente,Tempo_Medio_ms,Melhor_NetProfit,Melhor_Alfa,Custo_Equivalente,LB_Cost_Paper,Gap(%)\n";
+            csvCriar << "Data_Hora,Instancia,Parametros_Teste,Algoritmo,Parametros_Algoritmo,Semente,Tempo_Medio_ms,Melhor_NetProfit,Custo_Equivalente,LB_Cost_Paper,Gap(%)\n";
             csvCriar.close();
         }
     }
@@ -88,38 +88,38 @@ int main(int argc, char* argv[]) {
 
         std::mt19937 gen(seed);
 
-        // Adicionado o parâmetro opcional 'alfaRodada' à assinatura da lambda para capturar o melhor alfa
-        auto executarRodadaDeDez = [&](const std::string& nomeAlgo, const std::string& parametrosStr, auto funcaoAlgo, std::string alfaGlobalStr = "N/A") {
+        auto executarRodadaDeDez = [&](const std::string& nomeAlgo, const std::string& parametrosStr, auto funcaoAlgo) {
             int melhorNetProfit = std::numeric_limits<int>::min();
             double tempoTotal = 0.0;
             
             std::cout << " -> Rodando " << nomeAlgo << " (10 vezes)... ";
             for (int i = 0; i < 10; ++i) {
+
+                size_t hashAlgo = std::hash<std::string>{}(nomeAlgo + "|" + parametrosStr);
+                unsigned int seedChamada = seed ^ (hashAlgo + 0x9e3779b9 + (i << 6) + (i >> 2));
+
+                std::mt19937 genChamada(seedChamada);
+
                 auto start = std::chrono::high_resolution_clock::now();
-                
-                // CHAMADA DO ALGORITMO
-                auto resultado = funcaoAlgo();
-                
+                auto resultado = funcaoAlgo(genChamada);
                 auto end = std::chrono::high_resolution_clock::now();
                 
                 double duracao = std::chrono::duration<double, std::milli>(end - start).count();
                 tempoTotal += duracao;
-
-                // SE O ALGORITMO RETORNAR UM PAIR (Lucro, Alfa) -> Caso do Reativo
-                if constexpr (std::is_same_v<decltype(resultado), std::pair<int, double>>) {
+                
+                 if constexpr (std::is_same_v<decltype(resultado), std::pair<int, double>>) {
                     auto [netProfit, alfaRodada] = resultado;
                     if (netProfit > melhorNetProfit) {
-                        melhorNetProfit = netProfit;
-                        alfaGlobalStr = std::to_string(alfaRodada); // Atualiza o alfa que vai pro CSV na hora certa!
+                    melhorNetProfit = netProfit;
+                    alfaGlobalStr = std::to_string(alfaRodada); 
                     }
-                } 
-                // SE RETORNAR O PADRÃO (Arvore, Lucro) -> Outros algoritmos
+                }
                 else {
                     auto [arvore, netProfit] = resultado;
                     if (netProfit > melhorNetProfit) {
-                        melhorNetProfit = netProfit;
+                    melhorNetProfit = netProfit;
                     }
-                }
+                 }
             }
             
             double tempoMedio = tempoTotal / 10.0;
@@ -140,7 +140,6 @@ int main(int argc, char* argv[]) {
                         << seed << ","
                         << tempoMedio << ","
                         << melhorNetProfit << ","
-                        << alfaGlobalStr << ","      // Gravando o melhor alfa coletado (ou "N/A" para os outros)
                         << custoEquivalente << ","
                         << lbPaper << ","
                         << std::fixed << std::setprecision(3) << gap << "\n";
@@ -149,28 +148,23 @@ int main(int argc, char* argv[]) {
         };
 
         // Guloso Puro
-        executarRodadaDeDez("Guloso Puro", "N/A", [&]() {
-            return graph.computePureGreedyPCST(gen);
+        executarRodadaDeDez("Guloso Puro", "N/A", [&](std::mt19937& g) {
+            return graph.computePureGreedyPCST(g);
         });
 
-        // Guloso Randomizado com Alpha Fixo
+        // Guloso Randomizado Multi-Alpha
         for (size_t i = 0; i < listaAlfas.size(); ++i) {
-            double alpha = listaAlfas[i];
-            std::string params = "alpha=" + std::to_string(alpha) + ";iter=" + std::to_string(numIteracoes30);
-            executarRodadaDeDez("Guloso Randomizado Alpha Fixo", params, [&]() {
-                return graph.computeRandomizedGreedyFixedAlpha(gen, alpha, numIteracoes30);
-            }, std::to_string(alpha)); // Passa o próprio alfa fixo para o CSV
+        double alpha = listaAlfas[i];
+        std::string params = "alpha=" + std::to_string(alpha) + "; iter=30";
+        executarRodadaDeDez("Guloso Randomizado Alpha Fixo", params, [&](std::mt19937& g) {
+            return graph.computeRandomizedGreedyMultiAlpha(g, alpha, 30);
+            });
         }
 
-       // Guloso Randomizado Reativo
+        // Guloso Randomizado Reativo
         std::string paramsReact = "alphas_qtd=" + std::to_string(listaAlfas.size()) + ";iter=300;bloco=45";
-
-        executarRodadaDeDez("Randomizado Reativo", paramsReact, [&]() {
-            double alfaDaRodada = -1.0;
-            auto [arvore, netProfit] = graph.computeReactiveGreedyPCST(gen, listaAlfas, numIteracoesInternasAdaptativo, tamanhoBloco, alfaDaRodada);
-            
-            // Retorna o lucro e o alfa da rodada atual como um par
-            return std::make_pair(netProfit, alfaDaRodada);
+        executarRodadaDeDez("Randomizado Reativo", paramsReact, [&](std::mt19937& g) {
+            return graph.computeReactiveGreedyPCST(g, listaAlfas, 300, 45);
         });
     }
 
