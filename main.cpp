@@ -27,18 +27,13 @@ bool arquivoExiste(const std::string& nomeArquivo) {
 int main(int argc, char* argv[]) {
     unsigned int seed;
     if (argc > 1) {
-        try { seed = std::stoul(argv[1]); } 
+        try { seed = std::stoul(argv[1]); }
         catch (...) { seed = std::chrono::system_clock::now().time_since_epoch().count(); }
     } else {
         seed = std::chrono::system_clock::now().time_since_epoch().count();
     }
-
     std::cout << "SEMENTE MESTRE: " << seed << "\n";
 
-    // ==================================================
-    // LOWER BOUNDS (LB) EXTRAÍDOS DA TABELA 3 DO ARTIGO (TEMA A)
-    // O artigo minimiza o Custo. Nossos LBs são para o Custo.
-    // ==================================================
     std::unordered_map<std::string, int> paperLB = {
         {"K100", 135511}, {"K100.1", 124108}, {"K100.2", 200262}, {"K100.3", 115953},
         {"K100.4", 87498}, {"K100.5", 119078}, {"K100.6", 132886}, {"K100.7", 172457},
@@ -59,21 +54,20 @@ int main(int argc, char* argv[]) {
     };
 
     std::vector<double> listaAlfas = {0.1, 0.3, 0.5, 0.8};
-    int numIteracoesInternasAdaptativo = 300; 
-    int tamanhoBloco = 45;
     std::string nomeCsv = "resultados_experimento_2.csv";
 
-    // Cabeçalho estrito conforme exigido pelo trabalho
+    // Cabeçalho com EXATAMENTE as 13 colunas solicitadas
     if (!arquivoExiste(nomeCsv)) {
         std::ofstream csvCriar(nomeCsv);
         if (csvCriar.is_open()) {
-            csvCriar << "Data_Hora,Instancia,Parametros_Teste,Algoritmo,Parametros_Algoritmo,Semente,Tempo_Medio_ms,Melhor_NetProfit,Custo_Equivalente,LB_Cost_Paper,Gap(%)\n";
+            csvCriar << "Data_Hora,Instancia,Algoritmo,Parametros_Algoritmo,Semente_Mestra,"
+                     << "Tempo_Medio_ms,Media_NetProfit,Media_Custo_Equivalente,LB_Cost_Paper,"
+                     << "Gap(%),Melhor_NetProfit,Melhor_Custo_Equivalente,Alpha_Melhor_Custo\n";
             csvCriar.close();
         }
     }
 
     for (const std::string& arquivoGrafo : listaGrafos) {
-        // Extrai nome da instância (ex: "instancias/K100.1.txt" -> "K100.1")
         std::string nomeInstancia = arquivoGrafo;
         size_t start = nomeInstancia.find('/') + 1;
         size_t end = nomeInstancia.find(".txt");
@@ -81,87 +75,94 @@ int main(int argc, char* argv[]) {
 
         SteinerGraph graph;
         ReaderSteiner::readFromFile(arquivoGrafo, graph);
-        
-        // Calcula o P_total para conversão de NetProfit -> Custo do Artigo
+
         int P_total = graph.getTotalPrize();
         int lbPaper = paperLB.count(nomeInstancia) ? paperLB[nomeInstancia] : 0;
-
         std::mt19937 gen(seed);
 
+        // Lambda ajustada para lidar com o novo struct ResultadoExecucao
         auto executarRodadaDeDez = [&](const std::string& nomeAlgo, const std::string& parametrosStr, auto funcaoAlgo) {
-            int melhorNetProfit = std::numeric_limits<int>::min();
+            long long somaTotalNetProfit = 0;
+            int totalIteracoes = 0;
+            int melhorNetProfitGlobal = std::numeric_limits<int>::min();
+            double alphaDoMelhorGlobal = -1.0;
             double tempoTotal = 0.0;
-            
-            std::cout << " -> Rodando " << nomeAlgo << " (10 vezes)... ";
-            for (int i = 0; i < 10; ++i) {
+            std::string alphaDoMelhorGlobalStr = "N/A";
 
+            std::cout << " -> Rodando " << nomeAlgo << " (10 execuções)... ";
+            
+            for (int i = 0; i < 10; ++i) {
                 size_t hashAlgo = std::hash<std::string>{}(nomeAlgo + "|" + parametrosStr);
                 unsigned int seedChamada = seed ^ (hashAlgo + 0x9e3779b9 + (i << 6) + (i >> 2));
-
                 std::mt19937 genChamada(seedChamada);
-
+                
                 auto start = std::chrono::high_resolution_clock::now();
-                auto resultado = funcaoAlgo(genChamada);
+                ResultadoExecucao resultado = funcaoAlgo(genChamada);
                 auto end = std::chrono::high_resolution_clock::now();
                 
                 double duracao = std::chrono::duration<double, std::milli>(end - start).count();
                 tempoTotal += duracao;
                 
-                 if constexpr (std::is_same_v<decltype(resultado), std::pair<int, double>>) {
-                    auto [netProfit, alfaRodada] = resultado;
-                    if (netProfit > melhorNetProfit) {
-                    melhorNetProfit = netProfit;
-                    alfaGlobalStr = std::to_string(alfaRodada); 
-                    }
+                // Acumula as estatísticas de todas as iterações internas
+                somaTotalNetProfit += resultado.soma_net_profit;
+                totalIteracoes += resultado.total_iteracoes;
+                
+                // Busca o melhor absoluto entre todas as execuções e iterações
+                if (resultado.melhor_net_profit > melhorNetProfitGlobal) {
+                    melhorNetProfitGlobal = resultado.melhor_net_profit;
+                    alphaDoMelhorGlobal = resultado.alpha_melhor;
                 }
-                else {
-                    auto [arvore, netProfit] = resultado;
-                    if (netProfit > melhorNetProfit) {
-                    melhorNetProfit = netProfit;
-                    }
-                 }
             }
             
-            double tempoMedio = tempoTotal / 10.0;
+            // CÁLCULOS FINAIS
+            double tempoMedio = tempoTotal / 10.0; // Tempo médio de 1 execução completa (com n iterações)
             
-            // CONVERSÃO PARA O DOMÍNIO DO ARTIGO (Minimização de Custo)
-            int custoEquivalente = P_total - melhorNetProfit;
-            double gap = (lbPaper > 0) ? (100.0 * (custoEquivalente - lbPaper) / lbPaper) : 0.0;
+            // Média real de todas as iterações (10 * n)
+            double mediaNetProfit = (double)somaTotalNetProfit / totalIteracoes;
+            double mediaCustoEquivalente = P_total - mediaNetProfit;
+            
+            // Melhores absolutos
+            int melhorCustoEquivalente = P_total - melhorNetProfitGlobal;
+            double gap = (lbPaper > 0) ? (100.0 * (melhorCustoEquivalente - lbPaper) / lbPaper) : 0.0;
+            
+            std::string alphaStr = (alphaDoMelhorGlobal >= 0.0) ? std::to_string(alphaDoMelhorGlobal) : "N/A";
 
-            std::cout << "Pronto! [Custo: " << custoEquivalente << " | LB Paper: " << lbPaper << " | Gap: " << std::fixed << std::setprecision(2) << gap << "%]\n";
+            std::cout << "Pronto! [Melhor Custo: " << melhorCustoEquivalente << " | LB: " << lbPaper << " | Gap: " << std::fixed << std::setprecision(2) << gap << "%]\n";
 
             std::ofstream csvFile(nomeCsv, std::ios::app);
             if (csvFile.is_open()) {
                 csvFile << obterDataHoraAtual() << ","
                         << nomeInstancia << ","
-                        << "N/A" << ","              // PCSTP não tem parâmetros globais de teste (capacidade, etc)
                         << nomeAlgo << ","
                         << "\"" << parametrosStr << "\","
                         << seed << ","
-                        << tempoMedio << ","
-                        << melhorNetProfit << ","
-                        << custoEquivalente << ","
+                        << std::fixed << std::setprecision(5) << tempoMedio << ","
+                        << std::fixed << std::setprecision(2) << mediaNetProfit << ","
+                        << std::fixed << std::setprecision(2) << mediaCustoEquivalente << ","
                         << lbPaper << ","
-                        << std::fixed << std::setprecision(3) << gap << "\n";
+                        << std::fixed << std::setprecision(3) << gap << ","
+                        << melhorNetProfitGlobal << ","
+                        << melhorCustoEquivalente << ","
+                        << alphaStr << "\n";
                 csvFile.close();
             }
         };
 
-        // Guloso Puro
+        // 1. Guloso Puro (1 iteração por execução)
         executarRodadaDeDez("Guloso Puro", "N/A", [&](std::mt19937& g) {
             return graph.computePureGreedyPCST(g);
         });
 
-        // Guloso Randomizado Multi-Alpha
+        // 2. Guloso Randomizado Alpha Fixo (30 iterações por execução)
         for (size_t i = 0; i < listaAlfas.size(); ++i) {
-        double alpha = listaAlfas[i];
-        std::string params = "alpha=" + std::to_string(alpha) + "; iter=30";
-        executarRodadaDeDez("Guloso Randomizado Alpha Fixo", params, [&](std::mt19937& g) {
-            return graph.computeRandomizedGreedyMultiAlpha(g, alpha, 30);
+            double alpha = listaAlfas[i];
+            std::string params = "alpha=" + std::to_string(alpha) + "; iter=30";
+            executarRodadaDeDez("Guloso Randomizado Alpha Fixo", params, [&](std::mt19937& g) {
+                return graph.computeRandomizedGreedyMultiAlpha(g, alpha, 30);
             });
         }
 
-        // Guloso Randomizado Reativo
+        // 3. Guloso Randomizado Reativo (300 iterações por execução)
         std::string paramsReact = "alphas_qtd=" + std::to_string(listaAlfas.size()) + ";iter=300;bloco=45";
         executarRodadaDeDez("Randomizado Reativo", paramsReact, [&](std::mt19937& g) {
             return graph.computeReactiveGreedyPCST(g, listaAlfas, 300, 45);

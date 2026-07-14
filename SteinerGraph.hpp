@@ -6,6 +6,7 @@
 #include <vector>
 #include <random>
 #include <algorithm>
+#include <limits>
 
 class Node {
 public:
@@ -19,16 +20,25 @@ public:
     ~Node() {}
 };
 
+// NOVO STRUCT: Retorna as estatísticas completas de uma rodada de execuções
+struct ResultadoExecucao {
+    long long soma_net_profit;   // Soma do net_profit de todas as iterações
+    int total_iteracoes;         // Quantidade total de iterações realizadas
+    int melhor_net_profit;       // O maior net_profit encontrado entre as iterações
+    double alpha_melhor;         // O alpha que gerou o melhor net_profit (-1.0 se não aplicável)
+};
+
 class SteinerGraph {
 private:
     std::unordered_map<int, Node> nodes;
     std::unordered_map<int, std::unordered_map<int, int>> adj;
+
 public:
     SteinerGraph() {}
     ~SteinerGraph() {}
 
-    // ... (mantenha os métodos addNode, removeNode, addEdge, etc. originais) ...
     void addNode(int name, int value) { nodes[name] = Node(name, value); }
+    
     void addEdge(int u, int v, int weight) {
         if (nodes.count(u) && nodes.count(v)) {
             adj[u][v] = weight;
@@ -36,7 +46,6 @@ public:
         }
     }
 
-    // NOVO MÉTODO: Calcula o prêmio total do grafo (P_total)
     int getTotalPrize() const {
         int total = 0;
         for (const auto& pair : nodes) {
@@ -48,22 +57,21 @@ public:
     std::pair<SteinerGraph, int> buildTreeRandomized(std::mt19937& gen, double alpha) {
         SteinerGraph tree;
         if (nodes.empty()) return {tree, 0};
-        
+
         std::vector<int> allNodes;
         for (auto& pair : nodes) allNodes.push_back(pair.first);
-        
         std::uniform_int_distribution<> dis(0, allNodes.size() - 1);
         int startNode = allNodes[dis(gen)];
-        
+
         std::unordered_set<int> visited;
         tree.addNode(startNode, nodes[startNode].value);
         visited.insert(startNode);
         int lucro_total = nodes[startNode].value;
-        
+
         while (true) {
             struct Candidate { int u; int v; int weight; int profit; };
             std::vector<Candidate> candidates;
-            
+
             for (int u : visited) {
                 if (adj.count(u)) {
                     for (auto& edge : adj[u]) {
@@ -76,28 +84,29 @@ public:
                     }
                 }
             }
+
             if (candidates.empty()) break;
-            
+
             int maxProfit = -999999;
             int minProfit = 999999;
             for (const auto& c : candidates) {
                 if (c.profit > maxProfit) maxProfit = c.profit;
                 if (c.profit < minProfit) minProfit = c.profit;
             }
-            
-            // CORREÇÃO DE BUG: O operador << é bitwise shift. O correto é apenas <=
-            if (maxProfit <= 0) break; 
-            
+
+            if (maxProfit <= 0) break;
+
             double threshold = maxProfit - alpha * (maxProfit - minProfit);
             std::vector<Candidate> rcl;
             for (const auto& c : candidates) {
                 if (c.profit >= threshold && c.profit > 0) rcl.push_back(c);
             }
+
             if (rcl.empty()) break;
-            
+
             std::uniform_int_distribution<> rclDis(0, rcl.size() - 1);
             Candidate chosen = rcl[rclDis(gen)];
-            
+
             tree.addNode(chosen.v, nodes[chosen.v].value);
             tree.addEdge(chosen.u, chosen.v, chosen.weight);
             visited.insert(chosen.v);
@@ -106,51 +115,65 @@ public:
         return {tree, lucro_total};
     }
 
-    std::pair<SteinerGraph, int> computePureGreedyPCST(std::mt19937& gen) {
-        return buildTreeRandomized(gen, 0.0);
+    // 1 Iteração
+    ResultadoExecucao computePureGreedyPCST(std::mt19937& gen) {
+        ResultadoExecucao res;
+        auto [tree, profit] = buildTreeRandomized(gen, 0.0);
+        res.soma_net_profit = profit;
+        res.total_iteracoes = 1;
+        res.melhor_net_profit = profit;
+        res.alpha_melhor = -1.0; // Não usa alpha
+        return res;
     }
 
-    std::pair<SteinerGraph, int> computeRandomizedGreedyMultiAlpha(std::mt19937& gen, double alpha, int iterations) {
-        SteinerGraph bestTree;
-        int bestProfit = -999999;
+    // N Iterações (Alpha Fixo)
+    ResultadoExecucao computeRandomizedGreedyMultiAlpha(std::mt19937& gen, double alpha, int iterations) {
+        ResultadoExecucao res;
+        res.soma_net_profit = 0;
+        res.total_iteracoes = iterations;
+        res.melhor_net_profit = std::numeric_limits<int>::min();
+        res.alpha_melhor = alpha;
 
         std::vector<uint32_t> subSeeds(iterations);
-        for (int i = 0; i < iterations; ++i) {
-            subSeeds[i] = gen();
-        }
+        for (int i = 0; i < iterations; ++i) subSeeds[i] = gen();
 
         for (int i = 0; i < iterations; ++i) {
             std::mt19937 subGen(subSeeds[i]);
             auto [currentTree, currentProfit] = buildTreeRandomized(subGen, alpha);
-            if (currentProfit > bestProfit) {
-            bestProfit = currentProfit;
-            bestTree = currentTree;
+            res.soma_net_profit += currentProfit;
+            if (currentProfit > res.melhor_net_profit) {
+                res.melhor_net_profit = currentProfit;
+            }
         }
-            
-        }
-        return {bestTree, bestProfit};
+        return res;
     }
 
-    std::pair<SteinerGraph, int> computeReactiveGreedyPCST(std::mt19937& gen, const std::vector<double>& alphas, int iterations, int blockSize) {
-        SteinerGraph bestTree;
-        int bestProfit = -999999;
+    // N Iterações (Reativo)
+    ResultadoExecucao computeReactiveGreedyPCST(std::mt19937& gen, const std::vector<double>& alphas, int iterations, int blockSize) {
+        ResultadoExecucao res;
+        res.soma_net_profit = 0;
+        res.total_iteracoes = iterations;
+        res.melhor_net_profit = std::numeric_limits<int>::min();
+        res.alpha_melhor = -1.0;
+
         size_t m = alphas.size();
         std::vector<double> probabilities(m, 1.0 / m);
         std::vector<std::vector<int>> blockHistory(m);
-        
+
         for (int it = 1; it <= iterations; ++it) {
             std::discrete_distribution<> dist(probabilities.begin(), probabilities.end());
             int idx_alpha = dist(gen);
             double alpha = alphas[idx_alpha];
-            
+
             auto [currentTree, currentProfit] = buildTreeRandomized(gen, alpha);
+            res.soma_net_profit += currentProfit;
             blockHistory[idx_alpha].push_back(currentProfit);
-            
-            if (currentProfit > bestProfit) {
-                bestProfit = currentProfit;
-                bestTree = currentTree;
+
+            if (currentProfit > res.melhor_net_profit) {
+                res.melhor_net_profit = currentProfit;
+                res.alpha_melhor = alpha; // Rastreia o alpha da melhor solução global
             }
-            
+
             if (it % blockSize == 0) {
                 std::vector<double> qualities(m, 0.0);
                 double sumQualities = 0.0;
@@ -170,7 +193,7 @@ public:
                 }
             }
         }
-        return {bestTree, bestProfit};
+        return res;
     }
 };
 #endif
